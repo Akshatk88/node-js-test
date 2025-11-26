@@ -1,26 +1,17 @@
-const bcrypt = require('bcrypt');
 const User = require("../models/User");
-
-const {
-    createAccessToken,
-    createRefreshToken,
-    verifyRefreshToken,
-} = require('../utils/tokenUtils');
-const { use } = require('react');
+const bcrypt = require("bcryptjs");
+const { generateAccessToken, generateRefreshToken } = require("../utils/tokenUtils");
+const jwt = require("jsonwebtoken");
 
 
-exports.register = async (req,res) => {
-    try{
-        const {name, email, password} = req.body;
-        
-        if(!name || !email|| !password)
-            return res.status(400).json({message:"Name, email are required"});
+exports.register = async (req, res) => {
+    try {
+        const { name, email, password } = req.body;
 
-        const existing  = await userInfo.findOne({email});
-        if (existing) return res.status(400).json({message:"email is already in use"});
+        const existing = await User.findOne({ email });
+        if (existing) return res.status(400).json({ message: "Email already exists" });
 
-        const salt = await bcrypt.genSalt(8);
-        const hashed  = await bcrypt.hash(password,salt);
+        const hashed = await bcrypt.hash(password, 10);
 
         const user = await User.create({
             name,
@@ -28,83 +19,57 @@ exports.register = async (req,res) => {
             password: hashed
         });
 
-        return res.status(201).json({message:"user registered",user: {id: user._id, name : user.name , email : user.email}});
-    }  catch (err){
-        return res.status(500).json({message:"server error"});
+        res.json({ message: "User registered", user });
+    } catch (err) {
+        console.log(err);
+        res.status(500).json({ message: "Server error" });
     }
 };
 
+ 
+exports.login = async (req, res) => {
+    try {
+        const { email, password } = req.body;
 
-exports.login = async (req,res) =>{
-try{
-    const {email, password} = req.body;
-    
-    const user  = await user.findOne({email});
-    if (!user) return res.status(401).json({message:"invalid details"});
+        const user = await User.findOne({ email });
+        if (!user) return res.status(400).json({ message: "Invalid email or password" });
 
+        const match = await bcrypt.compare(password, user.password);
+        if (!match) return res.status(400).json({ message: "Invalid email or password" });
 
-    const match  = await bcrypt.compare(password,user.password);
-    if (!ismatch) return res.status(401).json({message:"invalid details"});
+        const accessToken = generateAccessToken(user._id);
+        const refreshToken = generateRefreshToken(user._id);
 
-
-    const payload = { id : user._id, email : use.email};
-
-    const accessToken = createAccessToken(payload);
-    const refreshToken = refreshToken(payload);
-
-    user.refreshToken = refreshToken ;
-    await user.save ();
-
-    return res.json({
-        accessToken,
-        refreshToken,
-        expiresIn: proccess.env.ACCESS_TOKEN_EXPIRES || "50s"
-    });
-} 
-catch(err){
-    console.log(err);
-    return res.status(500).json({message:"server error"});
-}
-
-
-exports.refreshToken = async (req,res) => {
-    try{
-        const {refreshToken} = req.body;
-        if (!refreshToken) return res.status(400).json({message:"Refresh token is required"});
-
-        let payload;
-        try{
-            payload = verifyRefreshToken(refreshToken);
-        }
-        catch(err){
-            return res.status(401).json({message:"invalid token"})
-        }
-
-        const user  =  await User.findById(payload.id)
-        if(!user || !user.refreshToken){
-            return res.status(401).json({message:"refresh token is incorrect"})
-        }
-
-        if(user.refreshToken !== refreshToken){
-            return res.status(401).json({message:"refresh token is not correct"})
-        }
-
-        const newPayload = {id:user._id, email:user.email};
-        const newAccessToken = createAccessToken(newPayload);
-        const newRefeshToken = createRefreshToken(newPayload);
-
-        user.refreshToken = newRefeshToken
-        await user.save();
-
-        return res.json({
-            accessToken:newAccessToken,
-            refreshToken: newRefeshToken,
-            expiresIn:proccess.env.ACCESS_TOKEN_EXPIRES|| "50s"
+        res.json({
+            message: "Login successful",
+            accessToken,
+            refreshToken
         });
-    } catch (err){
-        console.log(err)
-        return res.status(500).json({message:"server error"})
+    } catch (err) {
+        console.log(err);
+        res.status(500).json({ message: "Server error" });
     }
+};
 
- }
+ 
+exports.refreshToken = async (req, res) => {
+    try {
+        const { token } = req.body;
+
+        if (!token) return res.status(401).json({ message: "Refresh token missing" });
+
+        jwt.verify(token, process.env.REFRESH_TOKEN_SECRET, (err, payload) => {
+            if (err) return res.status(403).json({ message: "Invalid refresh token" });
+
+            // generate new access token
+            const newAccessToken = generateAccessToken(payload.id);
+
+            res.json({
+                accessToken: newAccessToken
+            });
+        });
+    } catch (err) {
+        console.log(err);
+        res.status(500).json({ message: "Server error" });
+    }
 };
